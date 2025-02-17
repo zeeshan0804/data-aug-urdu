@@ -108,6 +108,7 @@ def main():
         save_steps=100,
         evaluation_strategy="no",
         predict_with_generate=True,
+        report_to=['tensorboard'],
         fp16=True,  # Enable mixed precision if supported
     )
 
