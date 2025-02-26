@@ -2,6 +2,7 @@
 import argparse
 import csv
 import logging
+import os
 import sys
 import math
 import numpy as np
@@ -16,6 +17,7 @@ from transformers import (
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
 )
+from transformers.trainer_utils import get_last_checkpoint
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,7 +39,7 @@ def load_tsv_dataset(file_path):
         reader = csv.reader(f, delimiter="\t")
         for row in reader:
             if len(row) < 2:
-                continue  # Skip lines that don't have at least two columns.
+                continue  # Skip lines without at least two columns.
             # Use only the second column.
             data["text"].append(row[1])
     return Dataset.from_dict(data)
@@ -104,7 +106,7 @@ def tokenize_and_noise(examples, tokenizer, max_length, noise_drop_prob, apply_n
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Denoising fine-tuning for Urdu sarcasm augmentation with train/val/test splits"
+        description="Denoising fine-tuning for Urdu sarcasm augmentation with train/val/test splits and checkpoint resume"
     )
     parser.add_argument(
         "--train_file",
@@ -122,7 +124,7 @@ def main():
         "--output_dir",
         type=str,
         required=True,
-        help="Directory to save the fine-tuned model",
+        help="Directory to save the fine-tuned model (and checkpoints)",
     )
     parser.add_argument("--num_train_epochs", type=int, default=3, help="Number of training epochs")
     parser.add_argument(
@@ -207,6 +209,7 @@ def main():
 
     # -----------------------------------------------------------------------------
     # Set up training arguments: evaluate and save every epoch.
+    # Only keep the latest checkpoint by setting save_total_limit=1.
     # -----------------------------------------------------------------------------
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
@@ -215,6 +218,7 @@ def main():
         learning_rate=args.learning_rate,
         evaluation_strategy="epoch",
         save_strategy="epoch",
+        save_total_limit=1,
         predict_with_generate=True,
         fp16=True,
         logging_steps=100,
@@ -234,10 +238,21 @@ def main():
     )
 
     # -----------------------------------------------------------------------------
+    # Check for existing checkpoint and resume if found
+    # -----------------------------------------------------------------------------
+    last_checkpoint = None
+    if os.path.isdir(args.output_dir):
+        last_checkpoint = get_last_checkpoint(args.output_dir)
+        if last_checkpoint is not None:
+            logger.info("Resuming training from checkpoint: %s", last_checkpoint)
+        else:
+            logger.info("No checkpoint found in %s. Training from scratch.", args.output_dir)
+
+    # -----------------------------------------------------------------------------
     # Training loop with per-epoch evaluation
     # -----------------------------------------------------------------------------
     logger.info("Starting training...")
-    train_result = trainer.train()
+    trainer.train(resume_from_checkpoint=last_checkpoint)
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
     
